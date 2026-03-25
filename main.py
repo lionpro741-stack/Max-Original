@@ -27,8 +27,20 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @app.get('/register_page')
-def
+def register_page(request: Request, db: Session= Depends(get_db)):
+
+
+
+
 
 
 
