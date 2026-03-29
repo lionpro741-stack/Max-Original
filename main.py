@@ -181,3 +181,6 @@ def send_message(
 
     # возвращаем обратно в чат
     return RedirectResponse(f'/chat/{chat_id}', status_code=303)
+
+
+print("hi")
