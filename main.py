@@ -55,6 +55,14 @@ def get_db():
         db.close()
 
 
+def get_current_user(request: Request, db: Session = Depends(get_db)):
+    """Получить текущего пользователя по cookie"""
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return None
+    return db.query(User).filter(User.id == int(user_id)).first()
+
+
 # --- МАРШРУТЫ ---
 
 @app.get('/')
@@ -233,7 +241,7 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
         if name:
             user.username = name
         if password:
-            user.password = int(password)
+            user.password = password  # Исправлено: был int(password), что ломало строки
         if avatar:
             user.avatar = avatar
         if description:
@@ -242,6 +250,71 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
 
 
     return RedirectResponse('/profile',status_code=303)
+
+
+@app.get('/chat/{chat_id}')
+def chat_page(chat_id: int, request: Request, db: Session = Depends(get_db)):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse("/login_page", status_code=303)
+
+    current_user_id = int(user_id)
+
+    # Находим чат
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return RedirectResponse("/chats", status_code=303)
+
+    # Проверяем, что пользователь участвует в чате
+    if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
+        return RedirectResponse("/chats", status_code=303)
+
+    # Находим собеседника
+    partner_id = chat.user2_id if chat.user1_id == current_user_id else chat.user1_id
+    opponent = db.query(User).filter(User.id == partner_id).first()
+
+    # Получаем сообщения
+    messages = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.id).all()
+
+    return templates.TemplateResponse("chat.html", {
+        "request": request,
+        "chat_id": chat_id,
+        "current_user_id": current_user_id,
+        "opponent": opponent,
+        "messages": messages
+    })
+
+
+@app.get('/api/messages/{chat_id}')
+def get_messages(chat_id: int, request: Request, db: Session = Depends(get_db)):
+    """API endpoint для получения новых сообщений"""
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return {"error": "Не авторизован"}
+
+    current_user_id = int(user_id)
+
+    # Проверяем доступ к чату
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return {"error": "Чат не найден"}
+
+    if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
+        return {"error": "Нет доступа"}
+
+    messages = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.id).all()
+    
+    return {
+        "messages": [
+            {
+                "id": m.id,
+                "text": m.text,
+                "sender_id": m.sender_id,
+                "timestamp": m.timestamp
+            }
+            for m in messages
+        ]
+    }
 
 
 
