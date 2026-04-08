@@ -1,7 +1,8 @@
 import uvicorn
 import datetime
+import json
 from fastapi import FastAPI, Depends, Form, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, or_, and_
 from sqlalchemy.ext.declarative import declarative_base
@@ -59,12 +60,12 @@ def get_db():
 
 @app.get('/')
 def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+    return templates.TemplateResponse("register.html", context={"request": request})
 
 
 @app.get('/login_page')
 def login_page(request: Request):
-    return templates.TemplateResponse('login.html', {"request": request})
+    return templates.TemplateResponse('login.html', context={"request": request})
 
 
 @app.post('/register')
@@ -107,7 +108,7 @@ def profile_page(request: Request, db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse("/login_page", status_code=303)
 
-    return templates.TemplateResponse("profile.html", {"request": request, "user": user})
+    return templates.TemplateResponse("profile.html", context={"request": request, "user": user})
 
 
 @app.get('/logout')
@@ -124,80 +125,87 @@ def chats_page(request: Request, db: Session = Depends(get_db)):
     if not user_id:
         return RedirectResponse("/login_page", status_code=303)
 
+    return templates.TemplateResponse("messenger.html", context={"request": request})
+
+
+# ===== API ЭНДПОИНТЫ =====
+
+@app.get('/api/chats')
+def api_get_chats(request: Request, db: Session = Depends(get_db)):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return {"error": "Не авторизован"}
+
     current_user_id = int(user_id)
-    
-    # Получаем все чаты, где участвует текущий пользователь
+
     chats = db.query(Chat).filter(
         or_(Chat.user1_id == current_user_id, Chat.user2_id == current_user_id)
     ).all()
-    
-    # Для каждого чата находим собеседника
-    chats_with_partners = []
+
+    result = []
     for chat in chats:
-        # Если current_user_id == user1_id, то собеседник — user2_id, и наоборот
         partner_id = chat.user2_id if chat.user1_id == current_user_id else chat.user1_id
         partner = db.query(User).filter(User.id == partner_id).first()
-        chats_with_partners.append((chat, partner))
-    
-    return templates.TemplateResponse("chats.html", {
-        "request": request,
-        "chats": chats_with_partners
-    })
+        
+        # Последнее сообщение
+        last_msg = db.query(Message).filter(Message.chat_id == chat.id).order_by(Message.id.desc()).first()
+        
+        result.append({
+            "chat_id": chat.id,
+            "partner": {
+                "id": partner.id,
+                "username": partner.username,
+                "avatar": partner.avatar,
+                "description": partner.description
+            },
+            "last_message": {
+                "text": last_msg.text if last_msg else None,
+                "timestamp": last_msg.timestamp if last_msg else None
+            } if last_msg else None
+        })
+
+    return result
 
 
-@app.get('/add_number_page')
-def add_number_page(request: Request, db: Session = Depends(get_db)):
+@app.get('/api/messages/{chat_id}')
+def api_get_messages(chat_id: int, request: Request, db: Session = Depends(get_db)):
     user_id = request.cookies.get("user_id")
     if not user_id:
-        return RedirectResponse("/login_page", status_code=303)
+        return {"error": "Не авторизован"}
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    return templates.TemplateResponse("add_number.html", {"request": request, "user": user})
+    current_user_id = int(user_id)
+    
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return {"error": "Чат не найден"}
+    
+    if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
+        return {"error": "Нет доступа"}
 
-
-@app.post('/add_number')
-def add_number(request: Request, number: str = Form(...), db: Session = Depends(get_db)):
-    current_user_id = request.cookies.get("user_id")
-    if not current_user_id:
-        return RedirectResponse('/login_page', status_code=303)
-
-    current_user_id = int(current_user_id)
-    target_user = db.query(User).filter(User.number == number).first()
-
-    if not target_user or target_user.id == current_user_id:
-        return RedirectResponse('/add_number_page', status_code=303)
-
-    existing_chat = db.query(Chat).filter(
-        or_(
-            and_(Chat.user1_id == current_user_id, Chat.user2_id == target_user.id),
-            and_(Chat.user1_id == target_user.id, Chat.user2_id == current_user_id)
-        )
-    ).first()
-
-    if existing_chat:
-        return RedirectResponse(f'/chat/{existing_chat.id}', status_code=303)
-
-    new_chat = Chat(user1_id=current_user_id, user2_id=target_user.id)
-    db.add(new_chat)
-    db.commit()
-    db.refresh(new_chat)
-
-    return RedirectResponse(f'/chat/{new_chat.id}', status_code=303)
+    messages = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.id).all()
+    
+    return [
+        {
+            "id": msg.id,
+            "text": msg.text,
+            "timestamp": msg.timestamp,
+            "is_mine": msg.sender_id == current_user_id
+        }
+        for msg in messages
+    ]
 
 
-@app.post('/send_message/{chat_id}')
-def send_message(
+@app.post('/api/send_message/{chat_id}')
+def api_send_message(
     chat_id: int,
     request: Request,
     text: str = Form(...),
     db: Session = Depends(get_db)
 ):
     user_id = request.cookies.get("user_id")
-
     if not user_id:
-        return RedirectResponse("/login_page", status_code=303)
+        return {"error": "Не авторизован"}
 
-    # создаём сообщение
     new_message = Message(
         chat_id=chat_id,
         sender_id=int(user_id),
@@ -208,8 +216,63 @@ def send_message(
     db.add(new_message)
     db.commit()
 
-    # возвращаем обратно в чат
-    return RedirectResponse(f'/chat/{chat_id}', status_code=303)
+    return {"status": "ok", "message_id": new_message.id}
+
+
+@app.post('/api/add_number')
+def api_add_number(request: Request, number: str = Form(...), db: Session = Depends(get_db)):
+    current_user_id = request.cookies.get("user_id")
+    if not current_user_id:
+        return {"error": "Не авторизован"}
+
+    current_user_id = int(current_user_id)
+    target_user = db.query(User).filter(User.number == number).first()
+
+    if not target_user or target_user.id == current_user_id:
+        return {"error": "Пользователь не найден"}
+
+    existing_chat = db.query(Chat).filter(
+        or_(
+            and_(Chat.user1_id == current_user_id, Chat.user2_id == target_user.id),
+            and_(Chat.user1_id == target_user.id, Chat.user2_id == current_user_id)
+        )
+    ).first()
+
+    if existing_chat:
+        return {
+            "chat_id": existing_chat.id,
+            "partner": {
+                "id": target_user.id,
+                "username": target_user.username,
+                "avatar": target_user.avatar,
+                "description": target_user.description
+            }
+        }
+
+    new_chat = Chat(user1_id=current_user_id, user2_id=target_user.id)
+    db.add(new_chat)
+    db.commit()
+    db.refresh(new_chat)
+
+    return {
+        "chat_id": new_chat.id,
+        "partner": {
+            "id": target_user.id,
+            "username": target_user.username,
+            "avatar": target_user.avatar,
+            "description": target_user.description
+        }
+    }
+
+
+@app.get('/add_number_page')
+def add_number_page(request: Request, db: Session = Depends(get_db)):
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return RedirectResponse("/login_page", status_code=303)
+
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    return templates.TemplateResponse("add_number.html", context={"request": request, "user": user})
 
 
 @app.get('/settings_page')
@@ -222,7 +285,7 @@ def settings_page(request: Request,db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse("/login_page", status_code=303)
 
-    return templates.TemplateResponse('/settings.html',{"request": request,"user": user})
+    return templates.TemplateResponse('/settings.html', context={"request": request, "user": user})
 
 @app.post('/settings')
 def settings(request: Request,name: str = Form(None),password: str = Form(None),avatar: str = Form(None),description:str = Form(None),db: Session = Depends(get_db)):
@@ -244,11 +307,5 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
     return RedirectResponse('/profile',status_code=303)
 
 
-
-
-
-
-
-
-
-
+if __name__ == '__main__':
+    uvicorn.run('main:app', host='127.0.0.1', port=8000, reload=True)

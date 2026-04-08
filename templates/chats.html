@@ -7,17 +7,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root {
-<<<<<<< HEAD
-            --primary-color: #4a90e2;
-            --bg-color: #f4f7f6;
-            --text-color: #333;
-            --white: #ffffff;
-            --shadow: 0 4px 15px rgba(0,0,0,0.1);
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-=======
             --primary-color: #4A90E2;
             --bg-color: #f0f2f5;
             --text-main: #333;
@@ -26,7 +15,6 @@
 
         body {
             font-family: 'Segoe UI', Roboto, sans-serif;
->>>>>>> 7009c1d50c3080ab377c293ad6c7db8289de120f
             background-color: var(--bg-color);
             margin: 0;
             display: flex;
@@ -36,21 +24,6 @@
         }
 
         .container {
-<<<<<<< HEAD
-            width: 100%;
-            max-width: 500px;
-            background: var(--white);
-            padding: 30px;
-            border-radius: 20px;
-            box-shadow: var(--shadow);
-        }
-
-        h2 {
-            text-align: center;
-            color: var(--text-color);
-            margin-bottom: 25px;
-            font-weight: 600;
-=======
             background: white;
             width: 100%;
             max-width: 400px;
@@ -69,28 +42,10 @@
             margin: 0;
             color: var(--text-main);
             font-size: 24px;
->>>>>>> 7009c1d50c3080ab377c293ad6c7db8289de120f
         }
 
         .btn-back {
             display: inline-block;
-<<<<<<< HEAD
-            text-decoration: none;
-            color: var(--primary-color);
-            font-size: 0.9rem;
-            margin-bottom: 20px;
-            transition: transform 0.2s;
-        }
-
-        .btn-back:hover {
-            transform: translateX(-5px);
-        }
-
-        .chat-list {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-=======
             margin-bottom: 15px;
             color: var(--primary-color);
             text-decoration: none;
@@ -107,79 +62,93 @@
             list-style: none;
             padding: 0;
             margin: 0;
->>>>>>> 7009c1d50c3080ab377c293ad6c7db8289de120f
         }
 
         .chat-item {
             display: flex;
             align-items: center;
-            padding: 15px;
-<<<<<<< HEAD
-            border-radius: 15px;
-            background: #fff;
-            border: 1px solid #eee;
-            transition: all 0.3s ease;
+            padding: 12px 15px;
+            margin-bottom: 10px;
+            border-radius: 12px;
+            background: #fafafa;
+            border: 1px solid #e8e8e8;
+            transition: all 0.2s ease;
             text-decoration: none;
             color: inherit;
+            cursor: pointer;
         }
 
         .chat-item:hover {
             border-color: var(--primary-color);
+            background-color: #f5f9ff;
+            box-shadow: 0 4px 12px rgba(74, 144, 226, 0.15);
             transform: translateY(-2px);
-            box-shadow: 0 5px 10px rgba(0,0,0,0.05);
-            background-color: #fdfdfd;
         }
 
-        .chat-item img {
-            width: 55px;
-            height: 55px;
+        .chat-avatar {
+            width: 50px;
+            height: 50px;
             border-radius: 50%;
             object-fit: cover;
             margin-right: 15px;
-            border: 2px solid #eee;
+            border: 2px solid #ddd;
+            flex-shrink: 0;
         }
 
         .chat-info {
             flex-grow: 1;
+            min-width: 0;
         }
 
-        .chat-info .username {
+        .chat-info .chat-name {
             display: block;
-            font-weight: bold;
-            font-size: 1.1rem;
+            font-weight: 600;
+            font-size: 1rem;
             color: #222;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .chat-info .status {
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: #888;
         }
 
-        .btn-open {
+        .chat-btn {
             background-color: var(--primary-color);
             color: white;
-            padding: 8px 15px;
+            padding: 10px 18px;
             border-radius: 10px;
             text-decoration: none;
             font-size: 0.85rem;
             font-weight: 500;
-            transition: background 0.3s;
+            transition: background 0.2s;
+            white-space: nowrap;
+            flex-shrink: 0;
         }
 
-        .chat-item:hover .btn-open {
+        .chat-btn:hover {
             background-color: #357abd;
         }
 
-        .empty-state {
+        .no-chats {
             text-align: center;
-            padding: 40px 0;
+            padding: 50px 20px;
             color: #999;
         }
 
-        .empty-state i {
-            font-size: 3rem;
-            margin-bottom: 10px;
+        .no-chats i {
+            font-size: 4rem;
+            margin-bottom: 15px;
             display: block;
+            color: #ccc;
+        }
+
+        .no-chats p {
+            margin: 0 0 15px 0;
+            font-size: 1.1rem;
         }
 
         /* Адаптивность для мобилок */
@@ -189,101 +158,10 @@
                 border-radius: 0;
                 min-height: 100vh;
             }
-=======
-            border-bottom: 1px solid #eee;
-            transition: background 0.2s;
-        }
-
-        .chat-item:hover {
-            background: #f8f9fa;
-        }
-
-        .chat-item:last-child {
-            border-bottom: none;
-        }
-
-        .chat-avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            object-fit: cover;
-            margin-right: 15px;
-        }
-
-        .chat-info {
-            flex: 1;
-        }
-
-        .chat-name {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-main);
-            margin-bottom: 5px;
-        }
-
-        .chat-btn {
-            background-color: var(--primary-color);
-            color: white;
-            text-decoration: none;
-            padding: 8px 16px;
-            border-radius: 10px;
-            font-size: 13px;
-            font-weight: 600;
-            transition: background 0.2s;
-        }
-
-        .chat-btn:hover {
-            background-color: #357ABD;
-        }
-
-        /* Если чатов нет */
-        .no-chats {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-
-        .no-chats i {
-            font-size: 48px;
-            color: #ddd;
-            margin-bottom: 15px;
->>>>>>> 7009c1d50c3080ab377c293ad6c7db8289de120f
         }
     </style>
 </head>
 <body>
-<<<<<<< HEAD
-    <div class="container">
-        <a href="/profile" class="btn-back"><i class="fas fa-arrow-left"></i> В профиль</a>
-        <h2><i class="fas fa-comments"></i> Мои чаты</h2>
-
-        <div class="chat-list">
-            {% if chats %}
-              {% for chat in chats %}
-                  {# Логика определения собеседника: если user1 это не я, значит он партнер #}
-                  {% set partner = chat.user1 if chat.user1_id != user.id else chat.user2 %}
-
-                  <a href="/chat/{{ chat.id }}" class="chat-item">
-                      <img src="{{ partner.avatar if partner.avatar else 'https://via.placeholder.com/55' }}" alt="avatar">
-                      <div class="chat-info">
-                          <span class="username">{{ partner.username }}</span>
-                          <span class="status">Нажмите, чтобы открыть диалог</span>
-                      </div>
-                      <div class="btn-open">Открыть</div>
-                  </a>
-              {% endfor %}
-          {% else %}
-              <div class="empty-state">
-                  <i class="far fa-comment-dots"></i>
-                  <p>У вас пока нет активных чатов.</p>
-              </div>
-          {% endif %}
-        </div>
-    </div>
-</body>
-</html>
-=======
-
 <div class="container">
     <div class="header">
         <a href="/profile" class="btn-back">
@@ -296,12 +174,15 @@
         <ul class="chat-list">
             {% for chat, partner in chats %}
                 <li class="chat-item">
-                    <img src="{{ partner.avatar }}" alt="{{ partner.username }}" class="chat-avatar">
+                    <img src="{{ partner.avatar if partner.avatar else 'https://via.placeholder.com/50?text=' + partner.username[0] }}" alt="{{ partner.username }}" class="chat-avatar">
                     <div class="chat-info">
                         <div class="chat-name">{{ partner.username }}</div>
+                        {% if partner.description %}
+                            <div class="status">{{ partner.description[:30] }}{% if partner.description|length > 30 %}...{% endif %}</div>
+                        {% endif %}
                     </div>
                     <a href="/chat/{{ chat.id }}" class="chat-btn">
-                        <i class="fa-solid fa-comment"></i> Открыть чат
+                        <i class="fa-solid fa-comment"></i> Открыть
                     </a>
                 </li>
             {% endfor %}
@@ -311,7 +192,7 @@
             <i class="fa-regular fa-comments"></i>
             <p>У вас пока нет чатов</p>
             <a href="/add_number_page" style="color: var(--primary-color); text-decoration: none; font-weight: 600;">
-                Создать первый чат
+                <i class="fa-solid fa-user-plus"></i> Создать первый чат
             </a>
         </div>
     {% endif %}
@@ -319,4 +200,4 @@
 
 </body>
 </html>
->>>>>>> 7009c1d50c3080ab377c293ad6c7db8289de120f
+
