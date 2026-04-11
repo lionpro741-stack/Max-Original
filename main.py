@@ -1,10 +1,12 @@
+from xmlrpc.client import boolean
+
 import uvicorn
 import datetime
 import json
-from fastapi import FastAPI, Depends, Form, Request, Response
+from fastapi import FastAPI, Depends, Form, Request, Response, WebSocket
 from fastapi.responses import RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, or_, and_
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, or_, and_, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -40,12 +42,55 @@ class Message(Base):
     sender_id = Column(Integer, ForeignKey("users.id"))
     text = Column(String)
     timestamp = Column(String)
+    is_delivered = Column(Boolean, default=True)  # Доставлено (отправлено на сервер)
+    is_read = Column(Boolean, default=False)  # Прочитано собеседником
 
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
+
+
+# ===== МЕНЕДЖЕР WEBSOCKET ПОДКЛЮЧЕНИЙ =====
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, user_id: int, websocket: WebSocket):
+        if user_id in self.active_connections:
+            self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def send_notification(self, user_id: int, data: dict):
+        """Отправить уведомление пользователю"""
+        if user_id in self.active_connections:
+            for websocket in self.active_connections[user_id]:
+                try:
+                    await websocket.send_json(data)
+                except Exception:
+                    pass
+
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: int):
+    await manager.connect(user_id, websocket)
+    try:
+        while True:
+            # Поддержание соединения
+            await websocket.receive_text()
+    except Exception:
+        manager.disconnect(user_id, websocket)
 
 
 def get_db():
@@ -182,29 +227,31 @@ def api_get_messages(chat_id: int, request: Request, db: Session = Depends(get_d
         return {"error": "Не авторизован"}
 
     current_user_id = int(user_id)
-    
+
     chat = db.query(Chat).filter(Chat.id == chat_id).first()
     if not chat:
         return {"error": "Чат не найден"}
-    
+
     if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
         return {"error": "Нет доступа"}
 
     messages = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.id).all()
-    
+
     return [
         {
             "id": msg.id,
             "text": msg.text,
             "timestamp": msg.timestamp,
-            "is_mine": msg.sender_id == current_user_id
+            "is_mine": msg.sender_id == current_user_id,
+            "is_delivered": msg.is_delivered,
+            "is_read": msg.is_read
         }
         for msg in messages
     ]
 
 
 @app.post('/api/send_message/{chat_id}')
-def api_send_message(
+async def api_send_message(
     chat_id: int,
     request: Request,
     text: str = Form(...),
@@ -214,17 +261,45 @@ def api_send_message(
     if not user_id:
         return {"error": "Не авторизован"}
 
+    current_user_id = int(user_id)
+
+    # Находим чат и определяем собеседника
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return {"error": "Чат не найден"}
+
+    partner_id = chat.user2_id if chat.user1_id == current_user_id else chat.user1_id
+
     new_message = Message(
         chat_id=chat_id,
-        sender_id=int(user_id),
+        sender_id=current_user_id,
         text=text,
-        timestamp=str(datetime.datetime.now().strftime("%H:%M"))
+        timestamp=str(datetime.datetime.now().strftime("%H:%M")),
+        is_delivered=True,  # Сообщение доставлено на сервер
+        is_read=False  # Ещё не прочитано
     )
 
     db.add(new_message)
     db.commit()
 
-    return {"status": "ok", "message_id": new_message.id}
+    # Уведомляем собеседника о новом сообщении через WebSocket
+    await manager.send_notification(partner_id, {
+        "type": "new_message",
+        "chat_id": chat_id,
+        "message": {
+            "id": new_message.id,
+            "text": text,
+            "timestamp": new_message.timestamp,
+            "sender_id": current_user_id
+        }
+    })
+
+    return {
+        "status": "ok",
+        "message_id": new_message.id,
+        "is_delivered": True,
+        "is_read": False
+    }
 
 
 @app.post('/api/add_number')
@@ -273,6 +348,90 @@ def api_add_number(request: Request, number: str = Form(...), db: Session = Depe
     }
 
 
+# ===== ЭНДПОИНТЫ ДЛЯ СТАТУСОВ СООБЩЕНИЙ =====
+
+@app.post('/api/mark_as_read/{chat_id}')
+async def api_mark_as_read(chat_id: int, request: Request, db: Session = Depends(get_db)):
+    """Отметить все сообщения в чате как прочитанные"""
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return {"error": "Не авторизован"}
+
+    current_user_id = int(user_id)
+
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return {"error": "Чат не найден"}
+
+    if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
+        return {"error": "Нет доступа"}
+
+    # Определяем отправителя сообщений (собеседника)
+    sender_id = chat.user2_id if chat.user1_id == current_user_id else chat.user1_id
+
+    # Находим все непрочитанные сообщения от собеседника
+    unread_messages = db.query(Message).filter(
+        Message.chat_id == chat_id,
+        Message.sender_id == sender_id,
+        Message.is_read == False
+    ).all()
+
+    updated_count = 0
+    for msg in unread_messages:
+        msg.is_read = True
+        msg.is_delivered = True
+        updated_count += 1
+
+    db.commit()
+
+    # Уведомляем собеседника, что его сообщения прочитаны
+    if updated_count > 0:
+        await manager.send_notification(sender_id, {
+            "type": "messages_read",
+            "chat_id": chat_id,
+            "reader_id": current_user_id
+        })
+
+    return {
+        "status": "ok",
+        "updated_count": updated_count
+    }
+
+
+@app.get('/api/message_status/{chat_id}')
+def api_get_message_status(chat_id: int, request: Request, db: Session = Depends(get_db)):
+    """Получить статусы сообщений в чате (для синхронизации при открытии)"""
+    user_id = request.cookies.get("user_id")
+    if not user_id:
+        return {"error": "Не авторизован"}
+
+    current_user_id = int(user_id)
+
+    chat = db.query(Chat).filter(Chat.id == chat_id).first()
+    if not chat:
+        return {"error": "Чат не найден"}
+
+    if chat.user1_id != current_user_id and chat.user2_id != current_user_id:
+        return {"error": "Нет доступа"}
+
+    # Получаем все сообщения, где sender == current_user (мои сообщения)
+    my_messages = db.query(Message).filter(
+        Message.chat_id == chat_id,
+        Message.sender_id == current_user_id
+    ).all()
+
+    return {
+        "messages": [
+            {
+                "id": msg.id,
+                "is_delivered": msg.is_delivered,
+                "is_read": msg.is_read
+            }
+            for msg in my_messages
+        ]
+    }
+
+
 @app.get('/add_number_page')
 def add_number_page(request: Request, db: Session = Depends(get_db)):
     user_id = request.cookies.get("user_id")
@@ -313,6 +472,7 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
 
 
     return RedirectResponse('/profile',status_code=303)
+
 
 
 if __name__ == '__main__':

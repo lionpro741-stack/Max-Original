@@ -280,6 +280,29 @@
             font-size: 0.7rem;
             opacity: 0.7;
             text-align: right;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 4px;
+        }
+
+        .message-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-size: 0.75rem;
+        }
+
+        .message-status .check {
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        .message-status .check.read {
+            color: #4FC3F7;
+        }
+
+        .check-icon {
+            font-weight: bold;
         }
 
         .message-input-area {
@@ -501,6 +524,95 @@
 <script>
     let currentChatId = null;
     let refreshInterval = null;
+    let ws = null;
+    let currentUserId = null;
+    let messageStatuses = {};  // { messageId: { is_delivered, is_read } }
+
+    // Инициализация WebSocket
+    async function initWebSocket() {
+        // Получаем ID текущего пользователя из cookies
+        const cookies = document.cookie.split(';');
+        const userIdCookie = cookies.find(c => c.trim().startsWith('user_id='));
+        if (userIdCookie) {
+            currentUserId = parseInt(userIdCookie.split('=')[1]);
+        }
+
+        if (!currentUserId) {
+            console.error('Не удалось получить ID пользователя');
+            return;
+        }
+
+        // Подключаемся к WebSocket
+        ws = new WebSocket(`ws://127.0.0.1:8000/ws/${currentUserId}`);
+
+        ws.onopen = () => {
+            console.log('WebSocket подключен');
+        };
+
+        ws.onclose = () => {
+            console.log('WebSocket отключен. Переподключение через 3 секунды...');
+            setTimeout(initWebSocket, 3000);
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                // Новое сообщение от собеседника
+                if (data.type === 'new_message') {
+                    // Если открыт этот чат — перезагружаем сообщения
+                    if (currentChatId === data.chat_id) {
+                        loadMessages(currentChatId);
+                    }
+                    // Обновляем список чатов
+                    loadChats();
+                }
+                
+                // Сообщения прочитаны
+                if (data.type === 'messages_read') {
+                    // Обновляем статусы всех сообщений в этом чате
+                    if (currentChatId === data.chat_id) {
+                        updateAllMessagesToRead();
+                    }
+                }
+            } catch (e) {
+                console.error('Ошибка обработки сообщения:', e);
+            }
+        };
+
+        ws.onerror = (error) => {
+            console.error('Ошибка WebSocket:', error);
+        };
+    }
+
+    // Обновить все сообщения как прочитанные (визуально)
+    function updateAllMessagesToRead() {
+        document.querySelectorAll('[data-msg-id]').forEach(el => {
+            const msgId = el.dataset.msgId;
+            if (messageStatuses[msgId]) {
+                messageStatuses[msgId].is_read = true;
+                messageStatuses[msgId].is_delivered = true;
+                updateMessageIcon(msgId);
+            }
+        });
+    }
+
+    // Обновить иконку конкретного сообщения
+    function updateMessageIcon(messageId) {
+        const statusEl = document.querySelector(`[data-msg-status="${messageId}"]`);
+        if (!statusEl) return;
+
+        const status = messageStatuses[messageId];
+        if (!status) return;
+
+        if (status.is_read) {
+            statusEl.innerHTML = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+        } else if (status.is_delivered) {
+            statusEl.innerHTML = '<span class="check"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+        } else {
+            statusEl.innerHTML = '<span class="check"><span class="check-icon">✓</span></span>';
+        }
+    }
 
     // Загрузка списка чатов
     async function loadChats() {
@@ -546,12 +658,12 @@
     // Открытие чата
     async function openChat(chatId, partner) {
         currentChatId = chatId;
-        
+
         // Убираем активный класс у всех
         document.querySelectorAll('.chat-list-item').forEach(item => {
             item.classList.remove('active');
         });
-        
+
         // Добавляем активный класс текущему
         const activeItem = document.querySelector(`[data-chat-id="${chatId}"]`);
         if (activeItem) activeItem.classList.add('active');
@@ -570,27 +682,59 @@
         // Загружаем сообщения
         await loadMessages(chatId);
 
+        // Помечаем сообщения как прочитанные на сервере
+        await markAsRead(chatId);
+
         // Автообновление каждые 2 секунды
         if (refreshInterval) clearInterval(refreshInterval);
         refreshInterval = setInterval(() => loadMessages(chatId), 2000);
+    }
+
+    // Пометить сообщения как прочитанные
+    async function markAsRead(chatId) {
+        try {
+            await fetch(`/api/mark_as_read/${chatId}`, { method: 'POST' });
+        } catch (e) {
+            console.error('Ошибка отметки прочтения:', e);
+        }
     }
 
     // Загрузка сообщений
     async function loadMessages(chatId) {
         const response = await fetch(`/api/messages/${chatId}`);
         const messages = await response.json();
-        
+
         const container = document.getElementById('messagesContainer');
         const wasAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
-        
+
         container.innerHTML = '';
-        
+
         messages.forEach(msg => {
             const div = document.createElement('div');
             div.className = `message ${msg.is_mine ? 'my-message' : 'other-message'}`;
+            div.dataset.msgId = msg.id;
+
+            // Сохраняем статусы
+            messageStatuses[msg.id] = {
+                is_delivered: msg.is_delivered,
+                is_read: msg.is_read
+            };
+
+            // Формируем HTML для галочек (только для своих сообщений)
+            let statusHtml = '';
+            if (msg.is_mine) {
+                if (msg.is_read) {
+                    statusHtml = '<span class="message-status" data-msg-status="' + msg.id + '"><span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span></span>';
+                } else if (msg.is_delivered) {
+                    statusHtml = '<span class="message-status" data-msg-status="' + msg.id + '"><span class="check"><span class="check-icon">✓</span><span class="check-icon">✓</span></span></span>';
+                } else {
+                    statusHtml = '<span class="message-status" data-msg-status="' + msg.id + '"><span class="check"><span class="check-icon">✓</span></span></span>';
+                }
+            }
+
             div.innerHTML = `
                 <div class="message-text">${msg.text}</div>
-                <div class="message-time">${msg.timestamp}</div>
+                <div class="message-time">${msg.timestamp} ${statusHtml}</div>
             `;
             container.appendChild(div);
         });
@@ -673,6 +817,7 @@
     // Инициализация
     document.addEventListener('DOMContentLoaded', () => {
         loadChats();
+        initWebSocket();
     });
 </script>
 
