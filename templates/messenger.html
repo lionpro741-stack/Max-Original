@@ -290,19 +290,25 @@
             display: inline-flex;
             align-items: center;
             gap: 2px;
-            font-size: 0.75rem;
+            font-size: 0.85rem;
+            margin-left: 4px;
         }
 
         .message-status .check {
-            color: rgba(255, 255, 255, 0.7);
+            display: inline-flex;
+            align-items: center;
+            gap: 1px;
+            color: rgba(255, 255, 255, 0.8);
         }
 
         .message-status .check.read {
-            color: #4FC3F7;
+            color: #B3E5FC;
         }
 
         .check-icon {
             font-weight: bold;
+            font-size: 0.75rem;
+            line-height: 1;
         }
 
         .message-input-area {
@@ -557,7 +563,7 @@
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 // Новое сообщение от собеседника
                 if (data.type === 'new_message') {
                     // Если открыт этот чат — перезагружаем сообщения
@@ -567,13 +573,23 @@
                     // Обновляем список чатов
                     loadChats();
                 }
-                
+
                 // Сообщения прочитаны
                 if (data.type === 'messages_read') {
-                    // Обновляем статусы всех сообщений в этом чате
-                    if (currentChatId === data.chat_id) {
-                        updateAllMessagesToRead();
+                    // Обновляем статусы конкретных сообщений
+                    if (data.message_ids) {
+                        data.message_ids.forEach(msgId => {
+                            updateMessageStatus(msgId, { is_delivered: true, is_read: true });
+                        });
+                    } else {
+                        // Если нет message_ids, обновляем все в этом чате
+                        updateMessagesStatusesInChat(data.chat_id, true);
                     }
+                }
+                
+                // Сообщение доставлено
+                if (data.type === 'message_delivered') {
+                    updateMessageStatus(data.message_id, { is_delivered: true, is_read: false });
                 }
             } catch (e) {
                 console.error('Ошибка обработки сообщения:', e);
@@ -592,25 +608,61 @@
             if (messageStatuses[msgId]) {
                 messageStatuses[msgId].is_read = true;
                 messageStatuses[msgId].is_delivered = true;
-                updateMessageIcon(msgId);
+            }
+        });
+        
+        // Обновляем все иконки
+        document.querySelectorAll('[data-msg-status]').forEach(statusEl => {
+            statusEl.innerHTML = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+        });
+    }
+    
+    // Обновить статусы сообщений в определённом чате
+    function updateMessagesStatusesInChat(chatId, isRead) {
+        // Если этот чат сейчас открыт, обновляем визуально
+        if (currentChatId === chatId) {
+            document.querySelectorAll('[data-msg-status]').forEach(statusEl => {
+                if (isRead) {
+                    statusEl.innerHTML = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+                }
+            });
+        }
+        
+        // Обновляем в данных
+        document.querySelectorAll('[data-msg-id]').forEach(el => {
+            const msgId = el.dataset.msgId;
+            if (messageStatuses[msgId]) {
+                if (isRead) {
+                    messageStatuses[msgId].is_read = true;
+                    messageStatuses[msgId].is_delivered = true;
+                }
             }
         });
     }
-
-    // Обновить иконку конкретного сообщения
-    function updateMessageIcon(messageId) {
-        const statusEl = document.querySelector(`[data-msg-status="${messageId}"]`);
-        if (!statusEl) return;
-
-        const status = messageStatuses[messageId];
-        if (!status) return;
-
-        if (status.is_read) {
-            statusEl.innerHTML = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
-        } else if (status.is_delivered) {
-            statusEl.innerHTML = '<span class="check"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
-        } else {
-            statusEl.innerHTML = '<span class="check"><span class="check-icon">✓</span></span>';
+    
+    // Обновить статус конкретного сообщения
+    function updateMessageStatus(messageId, status) {
+        if (messageStatuses[messageId]) {
+            if (status.is_delivered !== undefined) {
+                messageStatuses[messageId].is_delivered = status.is_delivered;
+            }
+            if (status.is_read !== undefined) {
+                messageStatuses[messageId].is_read = status.is_read;
+            }
+            
+            // Обновляем иконку
+            const statusEl = document.querySelector(`[data-msg-status="${messageId}"]`);
+            if (statusEl) {
+                let newStatusHtml = '';
+                if (messageStatuses[messageId].is_read) {
+                    newStatusHtml = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+                } else if (messageStatuses[messageId].is_delivered) {
+                    newStatusHtml = '<span class="check"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+                } else {
+                    newStatusHtml = '<span class="check"><span class="check-icon">✓</span></span>';
+                }
+                statusEl.innerHTML = newStatusHtml;
+            }
         }
     }
 
@@ -684,6 +736,9 @@
 
         // Помечаем сообщения как прочитанные на сервере
         await markAsRead(chatId);
+        
+        // После markAsRead обновляем все сообщения визуально
+        updateAllMessagesToRead();
 
         // Автообновление каждые 2 секунды
         if (refreshInterval) clearInterval(refreshInterval);
@@ -739,32 +794,70 @@
             container.appendChild(div);
         });
 
+        // Обновляем статусы существующих сообщений (не пересоздаём их)
+        updateExistingMessagesStatuses(messages);
+
         // Прокрутка вниз
         if (wasAtBottom) {
             container.scrollTop = container.scrollHeight;
         }
+        
+        // Отправляем уведомление о доставке для всех моих непрочитанных сообщений
+        messages.filter(msg => msg.is_mine && !msg.is_delivered).forEach(msg => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'mark_as_delivered',
+                    message_id: msg.id
+                }));
+            }
+        });
+    }
+
+    // Обновление статусов существующих сообщений без перерисовки
+    function updateExistingMessagesStatuses(messages) {
+        messages.forEach(msg => {
+            if (!msg.is_mine) return;
+            
+            const statusEl = document.querySelector(`[data-msg-status="${msg.id}"]`);
+            if (!statusEl) return;
+
+            let newStatusHtml = '';
+            if (msg.is_read) {
+                newStatusHtml = '<span class="check read"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+            } else if (msg.is_delivered) {
+                newStatusHtml = '<span class="check"><span class="check-icon">✓</span><span class="check-icon">✓</span></span>';
+            } else {
+                newStatusHtml = '<span class="check"><span class="check-icon">✓</span></span>';
+            }
+
+            statusEl.innerHTML = newStatusHtml;
+        });
     }
 
     // Отправка сообщения
     async function sendMessage(event) {
         event.preventDefault();
-        
+
         const input = document.getElementById('messageInput');
         const text = input.value.trim();
-        
+
         if (!text || !currentChatId) return;
 
         const formData = new FormData();
         formData.append('text', text);
 
-        await fetch(`/api/send_message/${currentChatId}`, {
+        const response = await fetch(`/api/send_message/${currentChatId}`, {
             method: 'POST',
             body: formData
         });
 
+        const result = await response.json();
+        
         input.value = '';
+        
+        // Обновляем сообщения и список чатов
         await loadMessages(currentChatId);
-        await loadChats(); // Обновляем список чатов
+        await loadChats();
     }
 
     // Создание нового чата

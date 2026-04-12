@@ -1,5 +1,3 @@
-from xmlrpc.client import boolean
-
 import uvicorn
 import datetime
 import json
@@ -85,12 +83,34 @@ manager = ConnectionManager()
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: int):
     await manager.connect(user_id, websocket)
+    db = SessionLocal()
     try:
         while True:
-            # Поддержание соединения
-            await websocket.receive_text()
+            data = await websocket.receive_json()
+            
+            # Обработка разных типов сообщений
+            if data.get("type") == "typing":
+                # Можно добавить обработку статуса "печатает"
+                pass
+            elif data.get("type") == "mark_as_delivered":
+                # Отмечаем сообщение как доставленное
+                message_id = data.get("message_id")
+                if message_id:
+                    msg = db.query(Message).filter(Message.id == message_id).first()
+                    if msg:
+                        msg.is_delivered = True
+                        db.commit()
+                        
+                        # Уведомляем отправителя
+                        await manager.send_notification(msg.sender_id, {
+                            "type": "message_delivered",
+                            "message_id": message_id,
+                            "chat_id": msg.chat_id
+                        })
     except Exception:
         manager.disconnect(user_id, websocket)
+    finally:
+        db.close()
 
 
 def get_db():
@@ -294,11 +314,16 @@ async def api_send_message(
         }
     })
 
+    # Отправляем отправителю подтверждение с актуальными статусами
+    # Проверяем, онлайн ли собеседник
+    is_partner_online = partner_id in manager.active_connections
+    
     return {
         "status": "ok",
         "message_id": new_message.id,
         "is_delivered": True,
-        "is_read": False
+        "is_read": False,
+        "partner_online": is_partner_online
     }
 
 
@@ -377,9 +402,11 @@ async def api_mark_as_read(chat_id: int, request: Request, db: Session = Depends
     ).all()
 
     updated_count = 0
+    updated_message_ids = []
     for msg in unread_messages:
         msg.is_read = True
         msg.is_delivered = True
+        updated_message_ids.append(msg.id)
         updated_count += 1
 
     db.commit()
@@ -389,12 +416,14 @@ async def api_mark_as_read(chat_id: int, request: Request, db: Session = Depends
         await manager.send_notification(sender_id, {
             "type": "messages_read",
             "chat_id": chat_id,
-            "reader_id": current_user_id
+            "reader_id": current_user_id,
+            "message_ids": updated_message_ids
         })
 
     return {
         "status": "ok",
-        "updated_count": updated_count
+        "updated_count": updated_count,
+        "message_ids": updated_message_ids
     }
 
 
