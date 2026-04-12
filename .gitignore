@@ -1,0 +1,4 @@
+users.db  
+.qwen/  
+__pycache__/  
+.venv/ 
