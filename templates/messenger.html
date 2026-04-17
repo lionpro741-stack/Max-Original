@@ -286,6 +286,90 @@
             gap: 4px;
         }
 
+        /* ===== КНОПКА МЕНЮ СООБЩЕНИЯ (ТРИ ТОЧКИ) ===== */
+        .message-actions {
+            position: relative;
+            display: inline-block;
+            margin-left: 6px;
+        }
+
+        .message-menu-btn {
+            background: none;
+            border: none;
+            color: inherit;
+            cursor: pointer;
+            font-size: 0.85rem;
+            padding: 2px 4px;
+            border-radius: 50%;
+            opacity: 0.6;
+            transition: opacity 0.2s, background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .message:hover .message-menu-btn {
+            opacity: 1;
+        }
+
+        .message-menu-btn:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .message-dropdown {
+            display: none;
+            position: absolute;
+            right: 0;
+            bottom: 100%;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            min-width: 140px;
+            z-index: 100;
+            overflow: hidden;
+            margin-bottom: 5px;
+        }
+
+        .message-dropdown.show {
+            display: block;
+        }
+
+        .message-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background 0.15s;
+            color: #222;
+            font-size: 0.85rem;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+        }
+
+        .message-dropdown-item:hover {
+            background: #f5f5f5;
+        }
+
+        .message-dropdown-item.delete {
+            color: #e53935;
+        }
+
+        .message-dropdown-item.delete:hover {
+            background: #ffebee;
+        }
+
+        .message-dropdown-item.edit {
+            color: #222;
+        }
+
+        .message-dropdown-item.edit:hover {
+            background: #f5f5f5;
+        }
+
         .message-status {
             display: inline-flex;
             align-items: center;
@@ -527,6 +611,21 @@
     </div>
 </div>
 
+<!-- Модальное окно для редактирования сообщения -->
+<div class="modal" id="editMessageModal">
+    <div class="modal-content">
+        <h3><i class="fa-solid fa-pen"></i> Редактировать сообщение</h3>
+        <form onsubmit="saveEditedMessage(event)">
+            <input type="hidden" id="editMessageId">
+            <textarea id="editMessageText" rows="4" placeholder="Введите новое текст сообщения..." required style="width: 100%; padding: 12px 15px; border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 15px; outline: none; font-size: 1rem; resize: vertical; font-family: inherit;"></textarea>
+            <div class="modal-buttons">
+                <button type="submit" class="btn-primary">Сохранить</button>
+                <button type="button" class="btn-secondary" onclick="closeEditModal()">Отмена</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
     let currentChatId = null;
     let refreshInterval = null;
@@ -590,6 +689,40 @@
                 // Сообщение доставлено
                 if (data.type === 'message_delivered') {
                     updateMessageStatus(data.message_id, { is_delivered: true, is_read: false });
+                }
+
+                // Сообщение удалено
+                if (data.type === 'message_deleted') {
+                    const msgElement = document.querySelector(`[data-msg-id="${data.message_id}"]`);
+                    if (msgElement) {
+                        msgElement.style.transition = 'opacity 0.3s, transform 0.3s';
+                        msgElement.style.opacity = '0';
+                        msgElement.style.transform = 'scale(0.95)';
+                        setTimeout(() => msgElement.remove(), 300);
+                    }
+                    // Обновляем список чатов
+                    loadChats();
+                }
+
+                // Сообщение отредактировано
+                if (data.type === 'message_edited') {
+                    const msgElement = document.querySelector(`[data-msg-id="${data.message_id}"]`);
+                    if (msgElement) {
+                        // Обновляем текст
+                        const textElement = msgElement.querySelector('.message-text');
+                        if (textElement) {
+                            textElement.textContent = data.new_text;
+                        }
+                        // Обновляем время
+                        const timeElement = msgElement.querySelector('.message-time');
+                        if (timeElement) {
+                            const statusHtml = timeElement.querySelector('.message-status')?.outerHTML || '';
+                            const menuHtml = timeElement.querySelector('.message-actions')?.outerHTML || '';
+                            timeElement.innerHTML = `${data.timestamp} ${statusHtml} ${menuHtml}`;
+                        }
+                    }
+                    // Обновляем список чатов
+                    loadChats();
                 }
             } catch (e) {
                 console.error('Ошибка обработки сообщения:', e);
@@ -787,9 +920,32 @@
                 }
             }
 
+            // Кнопка меню с тремя точками (только для своих сообщений)
+            let menuHtml = '';
+            if (msg.is_mine) {
+                menuHtml = `
+                    <span class="message-actions">
+                        <button class="message-menu-btn" onclick="toggleMessageMenu(event, ${msg.id})">
+                            <i class="fa-solid fa-ellipsis"></i>
+                        </button>
+                        <div class="message-dropdown" id="msg-menu-${msg.id}">
+                            <button class="message-dropdown-item edit" onclick="editMessage(${msg.id}, '${msg.text.replace(/'/g, "\\'").replace(/"/g, '&quot;').replace(/\n/g, '\\n')}')">
+                                <i class="fa-solid fa-pen"></i> Редактировать
+                            </button>
+                            <button class="message-dropdown-item delete" onclick="deleteMessage(${msg.id}, 'all')">
+                                <i class="fa-solid fa-trash"></i> Удалить у всех
+                            </button>
+                            <button class="message-dropdown-item delete" onclick="deleteMessage(${msg.id}, 'self')">
+                                <i class="fa-solid fa-trash"></i> Удалить у меня
+                            </button>
+                        </div>
+                    </span>
+                `;
+            }
+
             div.innerHTML = `
                 <div class="message-text">${msg.text}</div>
-                <div class="message-time">${msg.timestamp} ${statusHtml}</div>
+                <div class="message-time">${msg.timestamp} ${statusHtml} ${menuHtml}</div>
             `;
             container.appendChild(div);
         });
@@ -912,6 +1068,152 @@
         loadChats();
         initWebSocket();
     });
+
+    // ===== МЕНЮ СООБЩЕНИЯ =====
+    function toggleMessageMenu(event, messageId) {
+        event.stopPropagation();
+
+        // Закрываем все другие меню
+        document.querySelectorAll('.message-dropdown.show').forEach(menu => {
+            if (menu.id !== `msg-menu-${messageId}`) {
+                menu.classList.remove('show');
+            }
+        });
+
+        // Переключаем текущее меню
+        const menu = document.getElementById(`msg-menu-${messageId}`);
+        if (menu) {
+            menu.classList.toggle('show');
+        }
+    }
+
+    // Закрыть меню при клике вне его
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.message-dropdown.show').forEach(menu => {
+            menu.classList.remove('show');
+        });
+    });
+
+    // Удаление сообщения
+    async function deleteMessage(messageId, mode) {
+        // mode: 'self' = удалить у себя, 'all' = удалить у всех
+        const confirmText = mode === 'all' 
+            ? 'Удалить это сообщение у всех?' 
+            : 'Удалить это сообщение у себя?';
+
+        if (!confirm(confirmText)) {
+            return;
+        }
+
+        try {
+            const endpoint = mode === 'all' 
+                ? `/api/delete_message/${messageId}` 
+                : `/api/delete_message_self/${messageId}`;
+
+            const response = await fetch(endpoint, {
+                method: 'DELETE'
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'ok') {
+                // Анимация удаления
+                const msgElement = document.querySelector(`[data-msg-id="${messageId}"]`);
+                if (msgElement) {
+                    msgElement.style.transition = 'opacity 0.3s, transform 0.3s';
+                    msgElement.style.opacity = '0';
+                    msgElement.style.transform = 'scale(0.95)';
+                    setTimeout(() => msgElement.remove(), 300);
+                }
+
+                // Обновляем список чатов
+                await loadChats();
+
+                // Если удалили у всех — уведомим собеседника через WebSocket
+                if (mode === 'all' && result.partner_id) {
+                    // Партнёр получит уведомление через WebSocket
+                }
+            } else {
+                alert('Ошибка при удалении: ' + (result.error || 'Неизвестная ошибка'));
+            }
+        } catch (e) {
+            console.error('Ошибка при удалении сообщения:', e);
+            alert('Ошибка при удалении сообщения');
+        }
+    }
+
+    // ===== РЕДАКТИРОВАНИЕ СООБЩЕНИЯ =====
+    function editMessage(messageId, currentText) {
+        // Закрываем меню
+        document.querySelectorAll('.message-dropdown.show').forEach(menu => {
+            menu.classList.remove('show');
+        });
+
+        // Открываем модальное окно
+        document.getElementById('editMessageId').value = messageId;
+        document.getElementById('editMessageText').value = currentText;
+        document.getElementById('editMessageModal').classList.add('show');
+        document.getElementById('editMessageText').focus();
+    }
+
+    function closeEditModal() {
+        document.getElementById('editMessageModal').classList.remove('show');
+        document.getElementById('editMessageId').value = '';
+        document.getElementById('editMessageText').value = '';
+    }
+
+    async function saveEditedMessage(event) {
+        event.preventDefault();
+
+        const messageId = document.getElementById('editMessageId').value;
+        const newText = document.getElementById('editMessageText').value.trim();
+
+        if (!newText || !messageId) {
+            alert('Сообщение не может быть пустым');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('new_message', newText);
+
+        try {
+            const response = await fetch(`/api/update_message/${messageId}`, {
+                method: 'PUT',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'ok') {
+                // Обновляем текст сообщения на странице
+                const msgElement = document.querySelector(`[data-msg-id="${messageId}"]`);
+                if (msgElement) {
+                    const textElement = msgElement.querySelector('.message-text');
+                    if (textElement) {
+                        textElement.textContent = result.new_text;
+                    }
+                    // Обновляем время
+                    const timeElement = msgElement.querySelector('.message-time');
+                    if (timeElement) {
+                        // Сохраняем статусы и меню, обновляем только время
+                        const statusHtml = timeElement.querySelector('.message-status')?.outerHTML || '';
+                        const menuHtml = timeElement.querySelector('.message-actions')?.outerHTML || '';
+                        timeElement.innerHTML = `${result.new_timestamp} ${statusHtml} ${menuHtml}`;
+                    }
+                }
+
+                // Обновляем список чатов (последнее сообщение)
+                await loadChats();
+
+                closeEditModal();
+            } else {
+                alert('Ошибка при редактировании: ' + (result.error || 'Неизвестная ошибка'));
+            }
+        } catch (e) {
+            console.error('Ошибка при редактировании:', e);
+            alert('Ошибка при редактировании сообщения');
+        }
+    }
 </script>
 
 </body>
