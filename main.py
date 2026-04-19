@@ -506,3 +506,5 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
 
 if __name__ == '__main__':
     uvicorn.run('main:app', host='127.0.0.1', port=8000, reload=True)
+
+print("Сервер запущен на http://)")
