@@ -14,6 +14,11 @@ engine = create_engine(DB_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+def encrypt(text, key):
+    return ''.join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(text))
+
+key = "Messenger_Max"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -133,12 +138,12 @@ def get_current_user(request: Request, db: Session = Depends(get_db)):
 
 @app.get('/')
 def register_page(request: Request):
-    return templates.TemplateResponse("register.html", context={"request": request})
+    return templates.TemplateResponse("register.html", {"request": request})
 
 
 @app.get('/login_page')
 def login_page(request: Request):
-    return templates.TemplateResponse('login.html', context={"request": request})
+    return templates.TemplateResponse('login.html', {"request": request})
 
 
 @app.post('/register')
@@ -154,15 +159,18 @@ def register(
     if existing:
         return {"error": "Пользователь с таким номером уже существует"}
 
-    new_user = User(username=username, number=number, adders=adders, avatar=avatar, password=password)
+    Pass = encrypt(password, key)
+    add = encrypt(adders, key)
+
+    new_user = User(username=username, number=number, adders=add, avatar=avatar, password=Pass)
     db.add(new_user)
     db.commit()
     return RedirectResponse(url="/login_page", status_code=303)
 
 
 @app.post('/login')
-def login(username: str = Form(...), number: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    check = db.query(User).filter(User.username == username, User.password == password, User.number == number).first()
+def login(username: str = Form(...), number: int = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    check = db.query(User).filter(User.username == username, User.password == encrypt(password, key), User.number == number).first()
     if not check:
         return RedirectResponse('/login_page', status_code=303)
 
@@ -181,7 +189,7 @@ def profile_page(request: Request, db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse("/login_page", status_code=303)
 
-    return templates.TemplateResponse("profile.html", context={request: request, "user": user})
+    return templates.TemplateResponse("profile.html", {"request": request, "user": user})
 
 
 @app.get('/logout')
@@ -198,7 +206,7 @@ def chats_page(request: Request, db: Session = Depends(get_db)):
     if not user_id:
         return RedirectResponse("/login_page", status_code=303)
 
-    return templates.TemplateResponse("messenger.html", context={request: request})
+    return templates.TemplateResponse("messenger.html", {"request": request})
 
 
 # ===== API ЭНДПОИНТЫ =====
@@ -257,10 +265,12 @@ def api_get_messages(chat_id: int, request: Request, db: Session = Depends(get_d
 
     messages = db.query(Message).filter(Message.chat_id == chat_id).order_by(Message.id).all()
 
+    # Messa = encrypt(messages[0].text, key)
+
     return [
         {
             "id": msg.id,
-            "text": msg.text,
+            "text": encrypt(msg.text, key),
             "timestamp": msg.timestamp,
             "is_mine": msg.sender_id == current_user_id,
             "is_delivered": msg.is_delivered,
@@ -293,7 +303,7 @@ async def api_send_message(
     new_message = Message(
         chat_id=chat_id,
         sender_id=current_user_id,
-        text=text,
+        text=encrypt(text, key),
         timestamp=str(datetime.datetime.now().strftime("%H:%M")),
         is_delivered=True,  # Сообщение доставлено на сервер
         is_read=False  # Ещё не прочитано
@@ -328,7 +338,7 @@ async def api_send_message(
 
 
 @app.post('/api/add_number')
-def api_add_number(request: Request, number: str = Form(...), db: Session = Depends(get_db)):
+def api_add_number(request: Request, number: int = Form(...), db: Session = Depends(get_db)):
     current_user_id = request.cookies.get("user_id")
     if not current_user_id:
         return {"error": "Не авторизован"}
@@ -468,7 +478,7 @@ def add_number_page(request: Request, db: Session = Depends(get_db)):
         return RedirectResponse("/login_page", status_code=303)
 
     user = db.query(User).filter(User.id == int(user_id)).first()
-    return templates.TemplateResponse("add_number.html", context={request: request, "user": user})
+    return templates.TemplateResponse("add_number.html", {"request": request, "user": user})
 
 
 @app.get('/settings_page')
@@ -481,7 +491,7 @@ def settings_page(request: Request,db: Session = Depends(get_db)):
     if not user:
         return RedirectResponse("/login_page", status_code=303)
 
-    return templates.TemplateResponse('/settings.html', context={request: request, "user": user})
+    return templates.TemplateResponse('/settings.html', {"request": request, "user": user})
 
 @app.post('/settings')
 def settings(request: Request,name: str = Form(None),password: str = Form(None),avatar: str = Form(None),description:str = Form(None),db: Session = Depends(get_db)):
@@ -492,7 +502,7 @@ def settings(request: Request,name: str = Form(None),password: str = Form(None),
         if name:
             user.username = name
         if password:
-            user.password = password  
+            user.password = encrypt(password, key)  
         if avatar:
             user.avatar = avatar
         if description:
